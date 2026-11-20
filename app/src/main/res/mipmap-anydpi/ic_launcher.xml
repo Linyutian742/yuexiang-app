@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 24-25 不支持 adaptive-icon，这里引用各密度 PNG。
+     anydpi 目录优先级高于 mipmap-{density}，所以必须指向新图标，
+     否则桌面仍会显示旧的默认地球图标。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@mipmap/ic_launcher_legacy" />
+</layer-list>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#64B5F6</color>
+    <color name="statusBar">#121212</color>
+    <color name="shellBackground">#121212</color>
+    <color name="errorText">#B0B0B0</color>
+</resources>

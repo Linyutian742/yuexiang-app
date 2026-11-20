@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 24-25 圆形图标兜底，与 ic_launcher.xml 保持同一张图 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@mipmap/ic_launcher_legacy" />
+</layer-list>

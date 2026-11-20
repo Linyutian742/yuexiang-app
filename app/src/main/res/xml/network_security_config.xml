@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 默认规则：只信任系统证书，全局禁止明文 HTTP。 -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- 仅对目标域名放开明文流量：DDNS 站点可能只提供 HTTP 或使用自签证书。
+         换成自己的域名时，记得同步改这里的 domain 值。
+         注意：这只影响「是否允许 HTTP 连接」，不会降低 HTTPS 的证书校验强度。 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">yuexiang.dpdns.org</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

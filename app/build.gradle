@@ -1,0 +1,59 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    // namespace 必须与 Kotlin 源码包名一致：R、BuildConfig 都生成在这个包下，
+    // Manifest 里的 ".MainActivity" 也按它解析。改这里会导致编译不过或启动闪退。
+    namespace 'com.example.webviewshell'
+    compileSdk 35
+
+    defaultConfig {
+        // applicationId 只决定 APK 包名，可以与 namespace 不同
+        applicationId 'com.yuexiang.shell'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+
+        // ============================================================
+        // 套壳地址配置（已填好，一般无需再改）
+        // SHELL_URL            : App 启动后加载的首页
+        // ALLOWED_HOSTS        : 允许在 WebView 内打开的域名（逗号分隔）
+        //                        写 "*" 表示所有 http/https 链接都在 App 内打开
+        //                        子域名会自动放行
+        // ENABLE_HTTP_FALLBACK : 首页 https 加载失败时，自动改用 http 重试一次
+        //                        （DDNS 站点常见自签证书或只开了 HTTP）
+        // ============================================================
+        buildConfigField 'String', 'SHELL_URL', '"https://yuexiang.dpdns.org/"'
+        buildConfigField 'String', 'ALLOWED_HOSTS', '"yuexiang.dpdns.org"'
+        buildConfigField 'boolean', 'ENABLE_HTTP_FALLBACK', 'true'
+    }
+
+    buildFeatures {
+        // AGP 8.x 默认不再生成 BuildConfig，这里必须显式打开
+        buildConfig = true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 正式签名配置见 README.md「打包签名 APK」
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    // 零第三方依赖：仅使用 Android SDK 与 Kotlin 标准库
+}

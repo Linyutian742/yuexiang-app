@@ -1,0 +1,164 @@
+name: 编译可安装 APK
+
+# 在 GitHub 网页上点「Run workflow」就能产出可直接装到手机的 APK，
+# 不需要本地装 Android Studio / Android SDK。
+on:
+  workflow_dispatch:
+    inputs:
+      site_url:
+        description: '首页地址（可只填域名，默认补 https://）'
+        required: true
+        default: 'https://yuexiang.dpdns.org/'
+      allowed_hosts:
+        description: '允许在 App 内打开的域名，多个用英文逗号分隔'
+        required: true
+        default: 'yuexiang.dpdns.org'
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # 修复：不再使用第三方 SDK 安装 action。
+      # 它会去安装 Google 早已下架的旧版 SDK Tools 包（现由 cmdline-tools 取代），
+      # 于是 sdkmanager 报「找不到 tools 包」并以错误码 1 退出。
+      # GitHub 托管的 ubuntu-latest 已预装 Android SDK，直接复用即可。
+      - name: 配置 Android SDK（复用 runner 预装环境）
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "SDK_ROOT=$SDK_ROOT"
+
+          # 新版 SDK 在 cmdline-tools，老镜像可能还在 tools/bin
+          for p in \
+            "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "$SDK_ROOT/cmdline-tools/bin/sdkmanager" \
+            "$SDK_ROOT/tools/bin/sdkmanager"; do
+            if [ -x "$p" ]; then SDKMANAGER="$p"; break; fi
+          done
+          if [ -z "${SDKMANAGER:-}" ]; then
+            SDKMANAGER="$(command -v sdkmanager || true)"
+          fi
+          if [ -z "${SDKMANAGER:-}" ]; then
+            echo "::error::找不到 sdkmanager，请检查 runner 上的 Android SDK：$SDK_ROOT"
+            ls -la "$SDK_ROOT" || true
+            exit 1
+          fi
+
+          echo "sdkmanager: $SDKMANAGER"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      - name: 接受许可并安装 SDK 组件
+        shell: bash
+        run: |
+          # 先接受许可，否则 sdkmanager 与 Gradle 自动下载都会被提示卡住
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --licenses > /dev/null || true
+          "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --version
+
+          # 这些包一定存在；已安装时 sdkmanager 会直接跳过
+          "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --install \
+            "platform-tools" "platforms;android-35"
+
+          # AGP 8.6.1 默认要 build-tools 35.0.0；不同镜像里小版本可能不同，逐个兜底
+          if "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --install "build-tools;35.0.0"; then
+            echo "build-tools;35.0.0 就绪"
+          else
+            echo "::warning::build-tools;35.0.0 不可用，从可用列表中挑选 35.x"
+            BT="$("$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --list 2>/dev/null \
+                  | grep -oE 'build-tools;35\.[0-9]+\.[0-9]+' | sort -uV | tail -1 || true)"
+            if [ -n "$BT" ]; then
+              "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --install "$BT"
+            else
+              echo "::warning::未查到 35.x build-tools，交由 Gradle 自动下载"
+            fi
+          fi
+
+      - name: 写入网址配置
+        env:
+          SITE_URL: ${{ inputs.site_url || 'https://yuexiang.dpdns.org/' }}
+          ALLOWED_HOSTS: ${{ inputs.allowed_hosts || 'yuexiang.dpdns.org' }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from urllib.parse import urlparse
+
+          url = os.environ['SITE_URL'].strip()
+          hosts = os.environ['ALLOWED_HOSTS'].strip() or 'yuexiang.dpdns.org'
+          if not url.startswith(('http://', 'https://')):
+              url = 'https://' + url
+          host = urlparse(url).hostname or 'yuexiang.dpdns.org'
+
+          # 1) app/build.gradle：首页地址与域名白名单
+          gradle = 'app/build.gradle'
+          lines = []
+          for line in open(gradle, encoding='utf-8').read().splitlines():
+              if "buildConfigField 'String', 'SHELL_URL'" in line:
+                  line = "        buildConfigField 'String', 'SHELL_URL', '\"%s\"'" % url
+              elif "buildConfigField 'String', 'ALLOWED_HOSTS'" in line:
+                  line = "        buildConfigField 'String', 'ALLOWED_HOSTS', '\"%s\"'" % hosts
+              lines.append(line)
+          open(gradle, 'w', encoding='utf-8').write('\n'.join(lines) + '\n')
+
+          # 2) 网络安全配置：明文流量放行的域名跟着首页一起变
+          nsc = 'app/src/main/res/xml/network_security_config.xml'
+          text = open(nsc, encoding='utf-8').read()
+          text = re.sub(
+              r'<domain includeSubdomains="true">[^<]*</domain>',
+              '<domain includeSubdomains="true">%s</domain>' % host,
+              text,
+          )
+          open(nsc, 'w', encoding='utf-8').write(text)
+
+          print('SHELL_URL      =', url)
+          print('ALLOWED_HOSTS  =', hosts)
+          print('cleartext host =', host)
+          PY
+
+      - name: 编译 Debug APK（自带调试签名，可直接安装）
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: 整理产物
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk yuexiang-shell.apk
+          ls -lh yuexiang-shell.apk
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: yuexiang-shell-apk
+          path: yuexiang-shell.apk
+          retention-days: 30
+
+      - name: 发布到 Releases（手机浏览器可直接下载）
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: 安装包 #${{ github.run_number }}
+          files: yuexiang-shell.apk
+          body: |
+            用手机浏览器打开本页，直接下载 **yuexiang-shell.apk** 即可安装。
+            首页地址：${{ inputs.site_url || 'https://yuexiang.dpdns.org/' }}
+
+            Debug 签名仅供自测；如需上架应用商店，请按 README 第六节配置正式签名。
